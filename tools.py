@@ -5,10 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-try:
-    from .resolve_bridge import operations
-except ImportError:
-    from resolve_bridge import operations
+from .resolve_bridge import operations
 
 
 def _json_call(fn: Callable[..., dict[str, Any]], params: dict[str, Any]) -> str:

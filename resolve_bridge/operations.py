@@ -104,38 +104,58 @@ def _error(message: str, **payload: Any) -> dict[str, Any]:
     return {"ok": False, "error": message, **payload}
 
 
-def _add_existing_module_paths() -> list[str]:
-    added: list[str] = []
+def _resolve_module_search_paths() -> list[Path]:
+    paths: list[Path] = []
     env_api = os.environ.get("RESOLVE_SCRIPT_API")
     if env_api:
         api_modules = Path(env_api).expanduser() / "Modules"
         if api_modules.exists():
-            sys.path.insert(0, str(api_modules))
-            added.append(str(api_modules))
+            paths.append(api_modules)
 
     for path in COMMON_MODULE_PATHS:
         if path.exists():
-            sys.path.insert(0, str(path))
-            added.append(str(path))
+            paths.append(path)
 
-    return added
+    return paths
 
 
 def _import_resolve_module() -> tuple[Any | None, str | None, list[str]]:
-    added_paths = _add_existing_module_paths()
     try:
-        return importlib.import_module("DaVinciResolveScript"), None, added_paths
-    except Exception as exc:
-        return None, f"{type(exc).__name__}: {exc}", added_paths
+        return importlib.import_module("DaVinciResolveScript"), None, []
+    except Exception as direct_exc:
+        direct_error = f"{type(direct_exc).__name__}: {direct_exc}"
+
+    searched_paths = _resolve_module_search_paths()
+    errors = [f"default import failed: {direct_error}"]
+    for directory in searched_paths:
+        module_path = directory / "DaVinciResolveScript.py"
+        if not module_path.exists():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "DaVinciResolveScript",
+                module_path,
+            )
+            if spec is None or spec.loader is None:
+                errors.append(f"{module_path}: could not create import spec")
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module, None, [str(path) for path in searched_paths]
+        except Exception as exc:
+            errors.append(f"{module_path}: {type(exc).__name__}: {exc}")
+
+    return None, "; ".join(errors), [str(path) for path in searched_paths]
 
 
 def _connect() -> tuple[Any | None, dict[str, Any] | None]:
-    module, import_error, added_paths = _import_resolve_module()
+    module, import_error, searched_paths = _import_resolve_module()
     if module is None:
         return None, _error(
             "DaVinciResolveScript could not be imported.",
             import_error=import_error,
-            added_sys_paths=added_paths,
+            added_sys_paths=[],
+            searched_module_paths=searched_paths,
         )
 
     try:
@@ -144,13 +164,15 @@ def _connect() -> tuple[Any | None, dict[str, Any] | None]:
         return None, _error(
             "DaVinci Resolve scripting module imported, but scriptapp failed.",
             resolve_error=f"{type(exc).__name__}: {exc}",
-            added_sys_paths=added_paths,
+            added_sys_paths=[],
+            searched_module_paths=searched_paths,
         )
 
     if resolve is None:
         return None, _error(
             "DaVinci Resolve is not reachable. Open Resolve and enable scripting support.",
-            added_sys_paths=added_paths,
+            added_sys_paths=[],
+            searched_module_paths=searched_paths,
         )
 
     return resolve, None
@@ -356,7 +378,7 @@ def _probe_recommendation(
 
 
 def probe() -> dict[str, Any]:
-    module, import_error, added_paths = _import_resolve_module()
+    module, import_error, searched_paths = _import_resolve_module()
     resolve_reachable = False
     resolve_error = None
     current_project = None
@@ -389,7 +411,8 @@ def probe() -> dict[str, Any]:
         },
         existing_app_paths=existing_app_paths,
         existing_module_paths=[str(path) for path in COMMON_MODULE_PATHS if path.exists()],
-        added_sys_paths=added_paths,
+        added_sys_paths=[],
+        searched_module_paths=searched_paths,
         module_imported=module is not None,
         import_error=import_error,
         resolve_reachable=resolve_reachable,
@@ -534,7 +557,7 @@ def generate_fcpxml_timeline(
     width: int = 1920,
     height: int = 1080,
     markers: list[dict[str, Any]] | None = None,
-    dry_run: bool = False,
+    dry_run: bool = True,
 ) -> dict[str, Any]:
     if frame_rate <= 0 or frame_rate > 240:
         return _error("frame_rate must be between 1 and 240.", frame_rate=frame_rate)
@@ -663,7 +686,7 @@ def generate_marker_csv(
     output_path: str | None = None,
     name: str = "Hermes Markers",
     frame_rate: int = 24,
-    dry_run: bool = False,
+    dry_run: bool = True,
 ) -> dict[str, Any]:
     destination = _output_path(output_path, name, ".markers.csv")
     normalized = []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import platform
 import sys
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def test_davinci_resolve_plugin_registers_expected_tools():
         "resolve_generate_marker_csv",
     ]
     assert {tool["toolset"] for tool in ctx.tools} == {"davinciresolve"}
+    assert all(tool["check_fn"]() is (platform.system() == "Darwin") for tool in ctx.tools)
 
 
 def test_davinci_resolve_dry_run_handlers_return_json(tmp_path):
@@ -92,6 +94,64 @@ def test_davinci_resolve_dry_run_handlers_return_json(tmp_path):
     assert render["ok"] is True
     assert render["plan"]["render_format"] == "mov"
     assert render["plan"]["render_codec"] == "H264"
+
+
+def test_davinci_resolve_interchange_generators_default_to_dry_run(tmp_path):
+    tools = _load_tools()
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"not real media, but enough for path validation")
+    fcpxml_output = tmp_path / "timeline.fcpxml"
+    marker_output = tmp_path / "markers.csv"
+
+    fcpxml = json.loads(
+        tools.handle_generate_fcpxml_timeline(
+            {
+                "name": "Hermes FCPXML",
+                "media_paths": [str(media)],
+                "output_path": str(fcpxml_output),
+            }
+        )
+    )
+    markers = json.loads(
+        tools.handle_generate_marker_csv(
+            {
+                "markers": [{"frame": 0, "name": "Start"}],
+                "output_path": str(marker_output),
+            }
+        )
+    )
+
+    assert fcpxml["ok"] is True
+    assert fcpxml["dry_run"] is True
+    assert markers["ok"] is True
+    assert markers["dry_run"] is True
+    assert not fcpxml_output.exists()
+    assert not marker_output.exists()
+
+
+def test_resolve_module_discovery_does_not_mutate_sys_path(tmp_path, monkeypatch):
+    tools = _load_tools()
+    operations = tools.operations
+    api_root = tmp_path / "Resolve API"
+    modules_dir = api_root / "Modules"
+    modules_dir.mkdir(parents=True)
+    (modules_dir / "DaVinciResolveScript.py").write_text(
+        "SOURCE = 'isolated-file-loader'\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("RESOLVE_SCRIPT_API", str(api_root))
+    monkeypatch.setattr(operations, "COMMON_MODULE_PATHS", [])
+    monkeypatch.delitem(sys.modules, "DaVinciResolveScript", raising=False)
+    sys_path_before = list(sys.path)
+
+    module, error, searched_paths = operations._import_resolve_module()
+
+    assert error is None
+    assert module is not None
+    assert module.SOURCE == "isolated-file-loader"
+    assert searched_paths == [str(modules_dir)]
+    assert sys.path == sys_path_before
 
 
 def test_davinci_resolve_scan_media_folder(tmp_path):

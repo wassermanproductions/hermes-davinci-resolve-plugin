@@ -2,49 +2,25 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import platform
 
-PLUGIN_DIR = Path(__file__).resolve().parent
-if str(PLUGIN_DIR) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_DIR))
-
-try:
-    from . import schemas
-    from .tools import (
-        handle_append_to_current_timeline,
-        handle_capabilities,
-        handle_create_scripted_timeline,
-        handle_create_timeline,
-        handle_generate_fcpxml_timeline,
-        handle_generate_marker_csv,
-        handle_import_media,
-        handle_launch,
-        handle_project_summary,
-        handle_probe,
-        handle_render_status,
-        handle_render_timeline,
-        handle_scan_media_folder,
-        handle_timeline_marker,
-    )
-except ImportError:
-    import schemas
-    from tools import (
-        handle_append_to_current_timeline,
-        handle_capabilities,
-        handle_create_scripted_timeline,
-        handle_create_timeline,
-        handle_generate_fcpxml_timeline,
-        handle_generate_marker_csv,
-        handle_import_media,
-        handle_launch,
-        handle_project_summary,
-        handle_probe,
-        handle_render_status,
-        handle_render_timeline,
-        handle_scan_media_folder,
-        handle_timeline_marker,
-    )
+from . import schemas
+from .tools import (
+    handle_append_to_current_timeline,
+    handle_capabilities,
+    handle_create_scripted_timeline,
+    handle_create_timeline,
+    handle_generate_fcpxml_timeline,
+    handle_generate_marker_csv,
+    handle_import_media,
+    handle_launch,
+    handle_project_summary,
+    handle_probe,
+    handle_render_status,
+    handle_render_timeline,
+    handle_scan_media_folder,
+    handle_timeline_marker,
+)
 
 
 TOOLS = [
@@ -135,6 +111,10 @@ TOOLS = [
 ]
 
 
+def _is_macos() -> bool:
+    return platform.system() == "Darwin"
+
+
 def register(ctx):
     for name, schema, handler, description in TOOLS:
         ctx.register_tool(
@@ -142,5 +122,6 @@ def register(ctx):
             toolset="davinciresolve",
             schema=schema,
             handler=handler,
+            check_fn=_is_macos,
             description=description,
         )

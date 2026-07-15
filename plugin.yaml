@@ -1,5 +1,5 @@
 name: davinci-resolve
-version: 0.2.0
+version: 0.3.0
 description: Control DaVinci Resolve Studio live, or generate importable interchange files for free DaVinci Resolve.
 author: "Sam Wasserman"
 kind: standalone

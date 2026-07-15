@@ -1,0 +1,39 @@
+name: Plugin QA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Check out Hermes Agent loader fixture
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 3f0b0e20e8449ebaf4d3d69c292239547e445496
+          path: hermes-agent
+
+      - name: Install test dependencies
+        run: python -m pip install pytest==8.4.2 PyYAML==6.0.2
+
+      - name: Compile plugin
+        run: python -m compileall -q __init__.py schemas.py tools.py resolve_bridge
+
+      - name: Run unit and real PluginManager integration tests
+        env:
+          HERMES_AGENT_REPO: ${{ github.workspace }}/hermes-agent
+        run: python -m pytest tests -q

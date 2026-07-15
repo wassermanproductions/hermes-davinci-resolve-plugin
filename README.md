@@ -56,13 +56,22 @@ The plugin searches common Resolve module locations, including:
 
 ## Installation
 
-For a local Hermes install, copy this directory to:
+Install the repository as a standalone user plugin, then explicitly enable it:
 
 ```bash
-~/.hermes/plugins/davinci-resolve
+git clone https://github.com/wassermanproductions/hermes-davinci-resolve-plugin.git ~/.hermes/plugins/davinci-resolve
+hermes plugins enable davinci-resolve
 ```
 
-Then restart Hermes and confirm that the plugin is discovered.
+Restart Hermes, then confirm that `davinci-resolve` is enabled with:
+
+```bash
+hermes plugins list
+```
+
+This is intentionally a standalone plugin. It does not modify Hermes core files.
+Hermes loads it as a namespaced package through the normal user-plugin
+`PluginManager` path.
 
 The plugin metadata lives in `plugin.yaml`. The Python entry point is `__init__.py`, with tool schemas in `schemas.py`, Hermes handlers in `tools.py`, and Resolve-specific behavior in `resolve_bridge/operations.py`.
 
@@ -295,6 +304,15 @@ Studio QA should additionally cover:
 Recommended local validation command from the repository root:
 
 ```bash
-uv run --with pytest --with pytest-xdist pytest tests/test_davinci_resolve_plugin.py -q
+uv run --with pytest --with pyyaml pytest tests -q
 ```
 
+The integration suite requires a real Hermes Agent checkout and exercises
+discovery from a temporary `HERMES_HOME`, manifest parsing, namespaced package
+loading, real `PluginContext` registration, registry availability gating, and
+top-level import isolation:
+
+```bash
+HERMES_AGENT_REPO=/path/to/hermes-agent \
+  uv run --with pytest --with pyyaml pytest tests/test_pluginmanager_integration.py -q
+```
