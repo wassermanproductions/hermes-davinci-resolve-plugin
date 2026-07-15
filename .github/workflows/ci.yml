@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           repository: NousResearch/hermes-agent
-          ref: 3f0b0e20e8449ebaf4d3d69c292239547e445496
+          ref: 5f1991bf6b1a2409a98c5591a2eefe7143b72c9c
           path: hermes-agent
 
       - name: Install test dependencies
