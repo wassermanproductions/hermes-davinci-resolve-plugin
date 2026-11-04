@@ -5,6 +5,7 @@ author: "Sam Wasserman"
 kind: standalone
 platforms:
   - macos
+  - windows
 provides_tools:
   - resolve_capabilities
   - resolve_launch

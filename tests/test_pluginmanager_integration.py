@@ -97,7 +97,7 @@ def test_real_pluginmanager_discovers_user_install_without_import_shadowing(
     assert entry is not None
     assert entry.toolset == "davinciresolve"
     assert entry.check_fn is not None
-    assert entry.check_fn() is (platform.system() == "Darwin")
+    assert entry.check_fn() is (platform.system() in {"Darwin", "Windows"})
 
     import tools as tools_after
 

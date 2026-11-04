@@ -1,6 +1,6 @@
 # Hermes DaVinci Resolve Plugin
 
-This plugin lets Hermes Agent work with DaVinci Resolve on macOS.
+This plugin lets Hermes Agent work with DaVinci Resolve on macOS and Windows.
 
 It is intentionally dual-mode:
 
@@ -35,7 +35,7 @@ Free Resolve still requires the user to import the generated interchange files t
 
 ## Requirements
 
-- macOS.
+- macOS or Windows.
 - Hermes Agent with local plugin support.
 - DaVinci Resolve or DaVinci Resolve Studio installed locally.
 - Python environment capable of importing the plugin files.
@@ -270,7 +270,7 @@ Examples:
 ## Known Limitations
 
 - Live control requires DaVinci Resolve Studio. Free Resolve should use interchange mode.
-- The plugin currently targets macOS paths and app bundles.
+- The plugin targets macOS app bundles and the Windows default install (`C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe` with its scripting modules under `C:\ProgramData`); other layouts need an explicit `app_path` or `RESOLVE_SCRIPT_API`.
 - The scripted edit tool creates practical rough cuts from structured clip plans; it does not perform advanced NLE operations such as transitions, color grading, Fusion effects, detailed audio mixing, transcription, multicam sync, or semantic video analysis by itself.
 - Clip selection and script interpretation happen in Hermes, not inside the plugin.
 - FCPXML interchange is best-effort and intentionally simple so it remains predictable.

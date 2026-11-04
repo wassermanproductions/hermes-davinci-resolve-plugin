@@ -61,7 +61,44 @@ def test_davinci_resolve_plugin_registers_expected_tools():
         "resolve_generate_marker_csv",
     ]
     assert {tool["toolset"] for tool in ctx.tools} == {"davinciresolve"}
-    assert all(tool["check_fn"]() is (platform.system() == "Darwin") for tool in ctx.tools)
+    assert all(tool["check_fn"]() is (platform.system() in {"Darwin", "Windows"}) for tool in ctx.tools)
+
+
+def test_supported_platforms_cover_macos_and_windows(monkeypatch):
+    plugin = _load_plugin()
+
+    for system, expected in (("Darwin", True), ("Windows", True), ("Linux", False)):
+        monkeypatch.setattr(plugin.platform, "system", lambda system=system: system)
+        assert plugin._is_supported() is expected
+
+
+def test_import_resolve_module_survives_self_replacement(tmp_path, monkeypatch):
+    """DaVinciResolveScript replaces itself in sys.modules with the compiled module."""
+    plugin = _load_plugin()
+    operations = sys.modules[f"{plugin.__name__}.resolve_bridge.operations"]
+    modules_dir = tmp_path / "Modules"
+    modules_dir.mkdir()
+    (modules_dir / "DaVinciResolveScript.py").write_text(
+        "import sys\n"
+        "\n"
+        "class _CompiledModule:\n"
+        "    def scriptapp(self, name):\n"
+        "        return {'app': name}\n"
+        "\n"
+        "sys.modules[__name__] = _CompiledModule()\n",
+        encoding="utf-8",
+    )
+
+    sys.modules.pop("DaVinciResolveScript", None)
+    monkeypatch.setattr(operations, "_resolve_module_search_paths", lambda: [modules_dir])
+    try:
+        module, error, searched = operations._import_resolve_module()
+        assert error is None
+        assert module is not None
+        assert module.scriptapp("Resolve") == {"app": "Resolve"}
+        assert searched == [str(modules_dir)]
+    finally:
+        sys.modules.pop("DaVinciResolveScript", None)
 
 
 def test_davinci_resolve_dry_run_handlers_return_json(tmp_path):

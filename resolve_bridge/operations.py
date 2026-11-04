@@ -33,12 +33,34 @@ IMAGE_EXTENSIONS = {
 
 DEFAULT_MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | IMAGE_EXTENSIONS
 
+IS_WINDOWS = os.name == "nt"
+
+# On Windows, Resolve ships its scripting API under ProgramData and its binary
+# under Program Files. These paths do not exist on macOS.
+WINDOWS_RESOLVE_DIR = (
+    Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
+    / "Blackmagic Design"
+    / "DaVinci Resolve"
+)
+WINDOWS_SCRIPTING_DIR = (
+    Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+    / "Blackmagic Design"
+    / "DaVinci Resolve"
+    / "Support"
+    / "Developer"
+    / "Scripting"
+)
+WINDOWS_MODULE_PATHS = [WINDOWS_SCRIPTING_DIR / "Modules", WINDOWS_RESOLVE_DIR]
+WINDOWS_APP_PATHS = [WINDOWS_RESOLVE_DIR / "Resolve.exe"]
+
 COMMON_MODULE_PATHS = [
+    *WINDOWS_MODULE_PATHS,
     Path("/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/Modules"),
     Path("/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion"),
 ]
 
 COMMON_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve/DaVinci Resolve.app"),
     Path("/Applications/DaVinci Resolve/DaVinci Resolve Studio.app"),
     Path("/Applications/DaVinci Resolve 20/DaVinci Resolve.app"),
@@ -58,16 +80,19 @@ COMMON_APP_PATHS = [
 ]
 
 RESOLVE_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve/DaVinci Resolve.app"),
     Path("/Applications/DaVinci Resolve.app"),
 ]
 
 STUDIO_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve/DaVinci Resolve Studio.app"),
     Path("/Applications/DaVinci Resolve Studio.app"),
 ]
 
 RESOLVE_20_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve 20/DaVinci Resolve.app"),
     Path("/Applications/DaVinci Resolve 20.app"),
     Path("/Applications/DaVinci Resolve/DaVinci Resolve.app"),
@@ -75,6 +100,7 @@ RESOLVE_20_APP_PATHS = [
 ]
 
 STUDIO_20_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve Studio 20/DaVinci Resolve Studio.app"),
     Path("/Applications/DaVinci Resolve Studio 20.app"),
     Path("/Applications/DaVinci Resolve/DaVinci Resolve Studio.app"),
@@ -82,6 +108,7 @@ STUDIO_20_APP_PATHS = [
 ]
 
 RESOLVE_21_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve 21 Beta 3/DaVinci Resolve.app"),
     Path("/Applications/DaVinci Resolve 21 Beta/DaVinci Resolve.app"),
     Path("/Applications/DaVinci Resolve 21 Beta 3.app"),
@@ -89,6 +116,7 @@ RESOLVE_21_APP_PATHS = [
 ]
 
 STUDIO_21_APP_PATHS = [
+    *WINDOWS_APP_PATHS,
     Path("/Applications/DaVinci Resolve Studio 21 Beta 3/DaVinci Resolve Studio.app"),
     Path("/Applications/DaVinci Resolve Studio 21 Beta/DaVinci Resolve Studio.app"),
     Path("/Applications/DaVinci Resolve Studio 21 Beta 3.app"),
@@ -140,7 +168,18 @@ def _import_resolve_module() -> tuple[Any | None, str | None, list[str]]:
                 errors.append(f"{module_path}: could not create import spec")
                 continue
             module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            # Blackmagic's DaVinciResolveScript.py ends with
+            # `sys.modules[__name__] = script_module`, replacing itself with the
+            # compiled fusionscript module. exec_module keeps the object it was
+            # given, which then carries only the file's leftover locals and has
+            # no `scriptapp`. Read the module back from sys.modules afterwards.
+            sys.modules["DaVinciResolveScript"] = module
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                sys.modules.pop("DaVinciResolveScript", None)
+                raise
+            module = sys.modules.get("DaVinciResolveScript", module)
             return module, None, [str(path) for path in searched_paths]
         except Exception as exc:
             errors.append(f"{module_path}: {type(exc).__name__}: {exc}")
@@ -345,7 +384,12 @@ def _probe_recommendation(
     existing_app_paths: list[str],
 ) -> dict[str, Any]:
     studio_installed = any("Studio" in path for path in existing_app_paths)
-    resolve_installed = any("DaVinci Resolve.app" in path and "Studio" not in path for path in existing_app_paths)
+    # Only a macOS bundle name positively identifies the free edition. A Windows
+    # install exposes a single Resolve.exe, so the edition stays unknown there and
+    # an unreachable API must not be reported as "free edition detected".
+    free_edition_identified = any(
+        "DaVinci Resolve.app" in path and "Studio" not in path for path in existing_app_paths
+    )
     if resolve_reachable:
         return {
             "recommended_mode": "studio_live_control",
@@ -353,7 +397,7 @@ def _probe_recommendation(
             "free_interchange_available": True,
             "likely_reason": None,
         }
-    if module_imported and resolve_installed and not studio_installed:
+    if module_imported and free_edition_identified and not studio_installed:
         return {
             "recommended_mode": "free_interchange",
             "live_control_available": False,
@@ -732,6 +776,12 @@ def generate_marker_csv(
     )
 
 
+def _launch_command(target: str) -> list[str]:
+    if IS_WINDOWS:
+        return [target]
+    return ["open", target]
+
+
 def _candidate_app_paths(variant: str) -> list[Path]:
     if variant == "resolve":
         return RESOLVE_APP_PATHS
@@ -779,39 +829,66 @@ def launch_resolve(
         explicit_path = Path(app_path).expanduser().resolve()
         if not explicit_path.exists():
             return _error("Explicit app_path does not exist.", app_path=str(explicit_path))
-        if explicit_path.suffix != ".app":
-            return _error("Explicit app_path must point to a macOS .app bundle.", app_path=str(explicit_path))
+        if explicit_path.suffix.lower() not in {".app", ".exe"}:
+            return _error(
+                "Explicit app_path must point to a macOS .app bundle or a Windows Resolve.exe.",
+                app_path=str(explicit_path),
+            )
         selected_app_path = str(explicit_path)
-        command = ["open", selected_app_path]
+        command = _launch_command(selected_app_path)
     else:
         for candidate in _candidate_app_paths(variant):
             if candidate.exists():
                 selected_app_path = str(candidate)
-                command = ["open", selected_app_path]
+                command = _launch_command(selected_app_path)
                 break
 
     if command is None:
+        if IS_WINDOWS:
+            return _error(
+                "Could not find Resolve.exe under Program Files.",
+                variant=variant,
+                searched=[str(path) for path in _candidate_app_paths(variant)],
+            )
         app_name = "DaVinci Resolve Studio" if variant in {"studio", "studio20", "studio21"} else "DaVinci Resolve"
         command = ["open", "-a", app_name]
 
+    returncode = 0
+    stdout = ""
+    stderr = ""
     try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True)
+        if IS_WINDOWS:
+            # Detach so Hermes does not block until Resolve exits.
+            detached = subprocess.Popen(
+                command,
+                close_fds=True,
+                creationflags=(
+                    getattr(subprocess, "DETACHED_PROCESS", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                ),
+            )
+            stdout = f"pid={detached.pid}"
+        else:
+            completed = subprocess.run(command, check=False, capture_output=True, text=True)
+            returncode = completed.returncode
+            stdout = completed.stdout.strip()
+            stderr = completed.stderr.strip()
     except Exception as exc:
         return _error(
-            "Failed to start the macOS open command.",
+            "Failed to start DaVinci Resolve.",
             launch_error=f"{type(exc).__name__}: {exc}",
             command=command,
             app_path=selected_app_path,
         )
 
-    if completed.returncode != 0:
+    if returncode != 0:
         return _error(
-            "macOS open command did not launch Resolve.",
+            "The launch command did not start Resolve.",
             command=command,
             app_path=selected_app_path,
-            returncode=completed.returncode,
-            stderr=completed.stderr.strip(),
-            stdout=completed.stdout.strip(),
+            returncode=returncode,
+            stderr=stderr,
+            stdout=stdout,
         )
 
     if wait_seconds:
