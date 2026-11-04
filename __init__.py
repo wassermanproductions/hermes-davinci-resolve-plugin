@@ -111,8 +111,9 @@ TOOLS = [
 ]
 
 
-def _is_macos() -> bool:
-    return platform.system() == "Darwin"
+def _is_supported() -> bool:
+    """macOS and Windows are supported; Windows by a local port (see WINDOWS-PORT.md)."""
+    return platform.system() in {"Darwin", "Windows"}
 
 
 def register(ctx):
@@ -122,6 +123,6 @@ def register(ctx):
             toolset="davinciresolve",
             schema=schema,
             handler=handler,
-            check_fn=_is_macos,
+            check_fn=_is_supported,
             description=description,
         )
